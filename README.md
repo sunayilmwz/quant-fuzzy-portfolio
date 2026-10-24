@@ -1,4 +1,4 @@
-# 📈 Quant Fuzzy Portfolio Optimizer 🧠
+# 📈 Quant Fuzzy Portfolio Optimizer 
 
 Hi there! 👋 Welcome to a project where I bring classic quantitative finance and modern machine learning together. 
 
