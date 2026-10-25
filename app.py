@@ -4,29 +4,31 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Import our custom quantitative modules
+# Core quantitative modules
 from data_loader import fetch_market_data, BIST30_TICKERS, SP500_TICKERS, MARKET_BENCHMARKS
 from metrics_risk import calculate_annualized_metrics, calculate_beta, calculate_tail_risk
 from fuzzy_engine import calculate_rsi, get_fuzzy_score
 from optimizer import maximize_sharpe_ratio, generate_random_portfolios, get_fuzzy_weighted_portfolio
 
-# --- 1. PAGE CONFIGURATION ---
+# V2 Econometric & Backtesting modules
+from regime_garch import fit_garch_volatility, detect_market_regimes
+from backtester import run_walk_forward_backtest
+
+# 1. PAGE CONFIGURATION
 st.set_page_config(
-    page_title="Quant & Fuzzy Portfolio Optimizer",
+    page_title="Quant & Fuzzy Portfolio Optimizer V2",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-
-# --- 2. SIDEBAR SETUP ---
+# 2. SIDEBAR SETUP
 st.sidebar.title("⚙️ Portfolio Parameters")
 st.sidebar.markdown("Configure your investment universe and constraints below.")
 
 market_choice = st.sidebar.radio("Select Market:", ["BIST-30", "S&P 500"])
 benchmark_ticker = MARKET_BENCHMARKS[market_choice]
 
-# Dynamically change available tickers based on market selection
 if market_choice == "BIST-30":
     available_tickers = BIST30_TICKERS
     default_tickers = ["THYAO.IS", "GARAN.IS", "TUPRS.IS", "BIMAS.IS", "SISE.IS"]
@@ -43,13 +45,19 @@ selected_tickers = st.sidebar.multiselect(
 time_period = st.sidebar.selectbox("Historical Data Range:", ["1y", "3y", "5y"], index=1)
 budget = st.sidebar.number_input("Investment Budget ($ / ₺):", min_value=1000, value=100000, step=5000)
 
-run_button = st.sidebar.button("🚀 Run Quantitative Analysis", use_container_width=True)
+st.sidebar.divider()
+st.sidebar.subheader("⏳ Backtest Engine Settings")
+lookback_window = st.sidebar.slider("Training Window (Trading Days):", min_value=63, max_value=252, value=126, step=21)
+rebalance_freq = st.sidebar.slider("Rebalance Frequency (Days):", min_value=10, max_value=63, value=21, step=5)
+tc_bps = st.sidebar.slider("Transaction Cost (Basis Points):", min_value=0.0, max_value=50.0, value=15.0, step=5.0)
 
-# --- 3. MAIN DASHBOARD AREA ---
-st.title("🧠 Quantitative Portfolio Optimization & Fuzzy Logic Scoring")
+run_button = st.sidebar.button("🚀 Run Institutional Quant Engine", use_container_width=True)
+
+# 3. MAIN TERMINAL AREA
+st.title("🧠 Quantitative Portfolio Optimization & Risk Terminal")
 st.markdown(f"""
-Welcome to the interactive engine! This tool fetches live data, calculates institutional-grade risk metrics (VaR, CVaR), 
-and compares a traditional **Markowitz Mean-Variance** optimization against a custom **Fuzzy Logic** scoring system.
+Welcome to the interactive engine! This tool fetches live data, calculates institutional-grade risk metrics, 
+and compares traditional **Markowitz Optimization** against a custom **Fuzzy Logic** scoring system.
 *Current Benchmark: **{benchmark_ticker}***
 """)
 
@@ -57,9 +65,9 @@ if run_button:
     if len(selected_tickers) < 2:
         st.error("Please select at least 2 assets to form a portfolio.")
     else:
-        with st.spinner("Fetching market data and running quantitative engines..."):
+        with st.spinner("Executing Quantitative Pipelines & ML Models..."):
             
-            # --- A. DATA FETCHING ---
+            # Data Fetching
             try:
                 prices_df, bench_prices, returns_df, bench_returns = fetch_market_data(
                     tickers=selected_tickers, 
@@ -70,138 +78,178 @@ if run_button:
                 st.error(f"Error fetching data: {e}")
                 st.stop()
 
-            # --- B. ENGINE CALCULATIONS ---
-            # 1. Asset Level Metrics & Fuzzy Scoring
-            asset_stats = []
-            fuzzy_scores_dict = {}
-            
-            for ticker in selected_tickers:
-                asset_ret = returns_df[ticker]
-                asset_price = prices_df[ticker]
-                
-                # Risk & Return
-                metrics = calculate_annualized_metrics(asset_ret)
-                beta = calculate_beta(asset_ret, bench_returns)
-                tail = calculate_tail_risk(asset_ret, confidence_level=0.95)
-                
-                # Fuzzy Logic
-                rsi_val = calculate_rsi(asset_price)
-                vol = metrics["Annual Volatility"]
-                sharpe = metrics["Sharpe Ratio"]
-                f_score = get_fuzzy_score(vol_val=vol, rsi_val=rsi_val, sharpe_val=sharpe)
-                
-                fuzzy_scores_dict[ticker] = f_score
-                
-                asset_stats.append({
-                    "Asset": ticker,
-                    "Fuzzy Score (0-100)": round(f_score, 1),
-                    "RSI": round(rsi_val, 1),
-                    "Beta": round(beta, 2),
-                    "Ann. Return": f"{metrics['Annual Return']*100:.1f}%",
-                    "Volatility": f"{metrics['Annual Volatility']*100:.1f}%",
-                    "Sharpe": round(metrics['Sharpe Ratio'], 2),
-                    "Max Drawdown": f"{metrics['Max Drawdown']*100:.1f}%",
-                    "VaR 95% (Hist)": f"{tail['Historical VaR (95.0%)']*100:.2f}%"
-                })
+            # TABS ARCHITECTURE
+            tab1, tab2, tab3 = st.tabs([
+                "📊 1. Allocation & Markowitz", 
+                "🧠 2. GARCH Volatility & ML Regimes", 
+                "⏳ 3. Walk-Forward Backtesting"
+            ])
 
-            stats_df = pd.DataFrame(asset_stats).set_index("Asset")
-            
-            # 2. Optimization (Markowitz vs Fuzzy)
-            mean_returns = returns_df.mean()
-            cov_matrix = returns_df.cov()
-            
-            markowitz_weights = maximize_sharpe_ratio(mean_returns, cov_matrix)
-            fuzzy_weights_dict = get_fuzzy_weighted_portfolio(fuzzy_scores_dict)
-            fuzzy_weights = np.array([fuzzy_weights_dict[t] for t in selected_tickers])
-            
-            # --- C. VISUALIZATIONS ---
-            
-            st.divider()
-            st.subheader("📊 1. Asset Diagnostics & Fuzzy Intelligence")
-            st.dataframe(stats_df, use_container_width=True)
-            
-            st.divider()
-            st.subheader("⚖️ 2. Portfolio Allocation: Math vs. Machine Intelligence")
-            st.markdown("Traditional algorithms often hyper-concentrate into a few assets. Our Fuzzy Logic engine mimics a human manager, ensuring better diversification based on momentum and risk-adjusted returns.")
-            
-            col1, col2 = st.columns(2)
-            
-            # Pie Chart 1: Markowitz
-            fig_markowitz = px.pie(
-                values=markowitz_weights, 
-                names=selected_tickers, 
-                title="Max Sharpe Portfolio (SciPy SLSQP)",
-                hole=0.4
-            )
-            fig_markowitz.update_traces(textposition='inside', textinfo='percent+label')
-            col1.plotly_chart(fig_markowitz, use_container_width=True)
-            
-            # Pie Chart 2: Fuzzy
-            fig_fuzzy = px.pie(
-                values=fuzzy_weights, 
-                names=selected_tickers, 
-                title="Fuzzy Logic Weighted Portfolio",
-                hole=0.4
-            )
-            fig_fuzzy.update_traces(textposition='inside', textinfo='percent+label')
-            col2.plotly_chart(fig_fuzzy, use_container_width=True)
-            
-            # Investment Budget Breakdown
-            st.markdown("#### 💰 Budget Allocation based on Fuzzy Weights")
-            budget_cols = st.columns(len(selected_tickers))
-            for i, ticker in enumerate(selected_tickers):
-                allocated = budget * fuzzy_weights[i]
-                budget_cols[i].metric(label=f"{ticker}", value=f"{allocated:,.2f}")
+            # TAB 1: ALLOCATION & OPTIMIZATION
+            with tab1:
+                asset_stats = []
+                fuzzy_scores_dict = {}
+                
+                for ticker in selected_tickers:
+                    asset_ret = returns_df[ticker]
+                    asset_price = prices_df[ticker]
+                    
+                    metrics = calculate_annualized_metrics(asset_ret)
+                    beta = calculate_beta(asset_ret, bench_returns)
+                    tail = calculate_tail_risk(asset_ret, confidence_level=0.95)
+                    
+                    rsi_val = calculate_rsi(asset_price)
+                    vol = metrics["Annual Volatility"]
+                    sharpe = metrics["Sharpe Ratio"]
+                    f_score = get_fuzzy_score(vol_val=vol, rsi_val=rsi_val, sharpe_val=sharpe)
+                    
+                    fuzzy_scores_dict[ticker] = f_score
+                    
+                    asset_stats.append({
+                        "Asset": ticker,
+                        "Fuzzy Score (0-100)": round(f_score, 1),
+                        "RSI": round(rsi_val, 1),
+                        "Beta": round(beta, 2),
+                        "Ann. Return": f"{metrics['Annual Return']*100:.1f}%",
+                        "Volatility": f"{metrics['Annual Volatility']*100:.1f}%",
+                        "Sharpe": round(metrics['Sharpe Ratio'], 2),
+                        "Max Drawdown": f"{metrics['Max Drawdown']*100:.1f}%",
+                        "VaR 95% (Hist)": f"{tail['Historical VaR (95.0%)']*100:.2f}%"
+                    })
 
-            st.divider()
-            st.subheader("🎯 3. Monte Carlo Simulation & Efficient Frontier")
-            st.markdown("Running 10,000 random portfolio combinations to visualize the risk-return landscape.")
-            
-            # Run Monte Carlo
-            mc_results, mc_weights = generate_random_portfolios(returns_df, num_portfolios=10000)
-            
-            # Create Scatter Plot for Efficient Frontier
-            mc_returns = mc_results[0, :] * 100  # Convert to percentage
-            mc_vols = mc_results[1, :] * 100
-            mc_sharpes = mc_results[2, :]
-            
-            fig_mc = go.Figure()
-            
-            # Add random portfolios
-            fig_mc.add_trace(go.Scatter(
-                x=mc_vols, 
-                y=mc_returns, 
-                mode='markers',
-                marker=dict(
-                    color=mc_sharpes,
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title="Sharpe Ratio"),
-                    size=5,
-                    opacity=0.6
-                ),
-                name='Random Portfolios'
-            ))
-            
-            # Highlight Max Sharpe
-            max_sharpe_idx = np.argmax(mc_sharpes)
-            fig_mc.add_trace(go.Scatter(
-                x=[mc_vols[max_sharpe_idx]],
-                y=[mc_returns[max_sharpe_idx]],
-                mode='markers',
-                marker=dict(color='red', size=15, symbol='star'),
-                name='Max Sharpe (Optimal)'
-            ))
-            
-            fig_mc.update_layout(
-                title="Efficient Frontier (10,000 Iterations)",
-                xaxis_title="Expected Annual Volatility (%)",
-                yaxis_title="Expected Annual Return (%)",
-                template="plotly_white",
-                height=600
-            )
-            
-            st.plotly_chart(fig_mc, use_container_width=True)
-            st.success("✅ Analysis Complete! You can now adjust parameters in the sidebar to re-run the engine.")
+                stats_df = pd.DataFrame(asset_stats).set_index("Asset")
+                
+                mean_returns = returns_df.mean()
+                cov_matrix = returns_df.cov()
+                
+                markowitz_weights = maximize_sharpe_ratio(mean_returns, cov_matrix)
+                fuzzy_weights_dict = get_fuzzy_weighted_portfolio(fuzzy_scores_dict)
+                fuzzy_weights = np.array([fuzzy_weights_dict[t] for t in selected_tickers])
+                
+                st.subheader("Asset Diagnostics & Fuzzy Intelligence")
+                st.dataframe(stats_df, use_container_width=True)
+                
+                st.divider()
+                st.subheader("Portfolio Allocation: Math vs. Machine Intelligence")
+                
+                col1, col2 = st.columns(2)
+                
+                fig_markowitz = px.pie(
+                    values=markowitz_weights, 
+                    names=selected_tickers, 
+                    title="Max Sharpe Portfolio (SciPy SLSQP)",
+                    hole=0.4
+                )
+                fig_markowitz.update_traces(textposition='inside', textinfo='percent+label')
+                col1.plotly_chart(fig_markowitz, use_container_width=True)
+                
+                fig_fuzzy = px.pie(
+                    values=fuzzy_weights, 
+                    names=selected_tickers, 
+                    title="Fuzzy Logic Weighted Portfolio",
+                    hole=0.4
+                )
+                fig_fuzzy.update_traces(textposition='inside', textinfo='percent+label')
+                col2.plotly_chart(fig_fuzzy, use_container_width=True)
+                
+                st.markdown("#### 💰 Budget Allocation based on Fuzzy Weights")
+                budget_cols = st.columns(len(selected_tickers))
+                for i, ticker in enumerate(selected_tickers):
+                    allocated = budget * fuzzy_weights[i]
+                    budget_cols[i].metric(label=f"{ticker}", value=f"{allocated:,.2f}")
+
+                st.divider()
+                st.subheader("Monte Carlo Simulation & Efficient Frontier")
+                
+                mc_results, mc_weights = generate_random_portfolios(returns_df, num_portfolios=10000)
+                mc_returns = mc_results[0, :] * 100
+                mc_vols = mc_results[1, :] * 100
+                mc_sharpes = mc_results[2, :]
+                
+                fig_mc = go.Figure()
+                fig_mc.add_trace(go.Scatter(
+                    x=mc_vols, y=mc_returns, mode='markers',
+                    marker=dict(color=mc_sharpes, colorscale='Viridis', showscale=True, size=5, opacity=0.6),
+                    name='Random Portfolios'
+                ))
+                
+                max_sharpe_idx = np.argmax(mc_sharpes)
+                fig_mc.add_trace(go.Scatter(
+                    x=[mc_vols[max_sharpe_idx]], y=[mc_returns[max_sharpe_idx]],
+                    mode='markers', marker=dict(color='red', size=15, symbol='star'),
+                    name='Max Sharpe'
+                ))
+                
+                fig_mc.update_layout(
+                    xaxis_title="Expected Annual Volatility (%)",
+                    yaxis_title="Expected Annual Return (%)",
+                    template="plotly_white", height=500
+                )
+                st.plotly_chart(fig_mc, use_container_width=True)
+
+            # TAB 2: GARCH & ML MARKET REGIMES
+            with tab2:
+                st.subheader("1. Econometric GARCH(1,1) Volatility Modeling")
+                st.caption("Capturing conditional variance and predicting next-period shocks.")
+                
+                target_asset = st.selectbox("Select Asset for GARCH Modeling:", selected_tickers)
+                cond_vol, next_vol, params = fit_garch_volatility(returns_df[target_asset])
+                
+                g1, g2, g3 = st.columns(3)
+                g1.metric("Forecasted Next Annual Volatility", f"{next_vol*100:.2f}%")
+                g2.metric("Shock Persistence (α + β)", f"{params['persistence']:.3f}")
+                g3.metric("Baseline Constant (ω)", f"{params['omega']:.6f}")
+
+                fig_garch = go.Figure()
+                fig_garch.add_trace(go.Scatter(
+                    x=cond_vol.index, y=cond_vol.values * 100, 
+                    line=dict(color="#FF4B4B", width=1.5), name="GARCH Volatility"
+                ))
+                fig_garch.update_layout(title=f"{target_asset} Dynamic Volatility Over Time", template="plotly_white", height=400)
+                st.plotly_chart(fig_garch, use_container_width=True)
+
+                st.divider()
+                st.subheader("2. Machine Learning Market Regime Detection (GMM)")
+                
+                regime_df, current_regime = detect_market_regimes(bench_returns, n_regimes=3)
+                st.info(f"📍 **Current Detected Market State for {benchmark_ticker}:** **{current_regime}**")
+                
+                fig_regime = px.scatter(
+                    regime_df, x="rolling_vol", y="rolling_ret", color="Regime",
+                    title=f"Unsupervised Market Clusters ({benchmark_ticker})",
+                    template="plotly_white",
+                    color_discrete_map={
+                        'Bull / Low Volatility': '#00CC96',
+                        'Neutral / Transition': '#FFA15A',
+                        'Bear / High-Vol Crisis': '#EF553B'
+                    }
+                )
+                st.plotly_chart(fig_regime, use_container_width=True)
+
+            # TAB 3: WALK-FORWARD BACKTESTING
+            with tab3:
+                st.subheader("Walk-Forward Backtesting Engine (Out-of-Sample)")
+                st.caption("Rolling rebalancing windows with real-world transaction costs. Zero look-ahead bias.")
+                
+                cum_returns, summary_table = run_walk_forward_backtest(
+                    returns_df=returns_df,
+                    lookback_days=lookback_window,
+                    rebalance_days=rebalance_freq,
+                    tc_bps=tc_bps
+                )
+                
+                st.dataframe(summary_table, use_container_width=True)
+                
+                fig_bt = go.Figure()
+                for col in cum_returns.columns:
+                    fig_bt.add_trace(go.Scatter(x=cum_returns.index, y=cum_returns[col], mode='lines', name=col))
+                
+                fig_bt.update_layout(
+                    title="Out-of-Sample Cumulative Growth of $1.00 Investment (Net of Trading Costs)",
+                    yaxis_title="Portfolio Wealth Multiplier",
+                    template="plotly_white", height=500
+                )
+                st.plotly_chart(fig_bt, use_container_width=True)
+
 else:
-    st.info("👈 Please select your parameters from the sidebar and click 'Run Quantitative Analysis'.")
+    st.info("👈 Please select your parameters from the sidebar and click 'Run Institutional Quant Engine'.")
